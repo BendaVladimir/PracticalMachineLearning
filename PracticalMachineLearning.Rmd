@@ -1,0 +1,169 @@
+---
+title: "PracticalMachineLearning"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Main goal of project is to create model which would be used for prediction of human activity, based on data collected from sensors. Data used for analysis were downloaded from webpage [http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har].
+
+Mentioned data will be used for prediction of activity based on selected variables from training dataset.
+
+Loading libraries necessary for analysis.
+
+
+```{r loading_libraries, message=FALSE, warning = FALSE}
+
+library(dplyr)
+library(readr)
+library(caret)
+library(randomForest)
+library(mlbench)
+library(rpart)
+library(randomForest)
+
+```
+
+Loading data to be used in training and validation of model.
+
+```{r loading_data}
+
+training_data <- read.csv("pml-training.csv")
+
+```
+
+### Data preparation
+
+First part of data analysis is identification of missing values in data to be used in training and validation.
+
+```{r null_values}
+
+nul_columns <- data.frame(training_data %>% is.na %>% colSums / nrow(training_data)) %>% 
+  rename("values" = "training_data.....is.na.....colSums.nrow.training_data.") %>% 
+  filter(values > 0) %>% count()
+
+```
+
+We can see that ```r nul_columns``` number of columns has missing values. Due to large percentage in missing values in identified columns these columns will be dropped. Following script will drop columns.
+
+```{r removing_null_columns}
+
+missing_columns <- data.frame(training_data %>% is.na %>% colSums / nrow(training_data)) %>% 
+  rename("values" = "training_data.....is.na.....colSums.nrow.training_data.") %>% filter(values == 0) %>% rownames()
+
+names(missing_columns) <- c("values")
+
+data_part1 <- training_data %>% select(all_of(missing_columns))
+
+``` 
+
+Secund part of data preparation is removing of columns with zero variance. It is expected that columns that have zero variability are less useful in prediction and creating models.
+
+```{r removing_near_zero_variance}
+
+near_zero_val <- data_part1 %>% nearZeroVar()
+
+data_part2 <- data_part1[,-near_zero_val]
+
+```
+
+There were ```r length(near_zero_val)```  number of columns that were removed from analysis dataset.
+
+Due to low predictive values and potencial bias of descriptive values following columns will also be removed from dataset: values, user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp and new_window.
+
+```{r removing_non_esential_columns}
+
+data_part2 <- data_part2[, -c(1:6)]
+
+```
+
+```{r heatmap}
+vals <- ncol(data_part2)-1
+
+mat <- as.matrix(data_part2[,1:vals])
+
+heatmap(mat)
+
+```
+
+In order to remove corelated predictors we will use function findCorrelation and filter out correlations that are higher that 0.5.  ```r vals```
+
+```{r removing_corelated_variables}
+set.seed(42)
+
+correlationMatrix <- cor(data_part2[,1:vals])
+corMatrix <- data.frame(correlationMatrix)
+highlyCorrelated <- findCorrelation(correlationMatrix, cutoff=0.5)
+data_part3 <- data_part2[,-highlyCorrelated]
+
+```
+
+Final preparation of data and recoding of target variable to factor.
+
+```{r final preparation}
+
+clean_train <- data_part3
+clean_train$classe <- as.factor(clean_train$classe)
+
+```
+
+### Creating training and validation datasets
+
+To train and test out of sample error two datasets will be created. Training dataset will contain 80% of observations from training set and rest of the values will be placed in validation set. Creating these datasets will be done via createDataPartition function from caret package.
+
+```{r creating_datasets}
+
+set.seed(42)
+train_index <- createDataPartition(clean_train$classe, list=FALSE, p = 0.8)
+training_set <- clean_train[train_index,]
+validation_set <- clean_train[-train_index,]
+
+```
+
+
+### Creating models for predictions
+
+In order to compare two approaches two packages will be used for training potential models. First package is caret and secund will be randomForest. Evaluation of models will be done via confusionMatrix.
+
+First model will be trained via caret package.
+
+```{r caret_model}
+
+control <- trainControl(method='repeatedcv', 
+                        number=10, 
+                        repeats=3)
+
+set.seed(42)
+RNGkind(kind = "default", normal.kind = "default", sample.kind = "default")
+knn_model <- train(classe ~ .,
+                   data = training_set, method="knn", trControl = control, metric = 'Accuracy')
+
+prediction <- predict(knn_model, newdata = validation_set)
+
+confusionMatrix(prediction, validation_set$classe)
+
+```
+
+As we can see from confusion matrix, accuracy of model on validation set is 82%, which is good exploratory power.
+
+Secund model will be trained via randomForest package.
+
+```{r random_forest_model}
+
+rand_forest <- randomForest(classe ~ .,
+             data = training_set)
+
+prediction1 <- predict(rand_forest, newdata = validation_set)
+confusionMatrix(prediction1, validation_set$classe)
+
+```
+
+Random forest model has greater explanatory power and accuracy on validation set is 98% and this model will be used in prediction of test values for next test.
+
+## Conclusion
+
+This project was focused on creating model to be used in prediction of human activity based on sensors they were wearing. 
+First part was focused on data preparation via removing variables which had missing values or were highly corelated.
+Secund part was focused on model training and evaluation on independent sample.
